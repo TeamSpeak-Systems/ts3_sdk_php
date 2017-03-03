@@ -42,6 +42,7 @@ struct ConnectionItem
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct WaitItem *wait_items = NULL;
 static struct ConnectionItem *connection_items = NULL;
+static pid_t pid = 0;
 
 static void to_asciiz(char** pointer, size_t length)
 {
@@ -244,6 +245,55 @@ static void onConnectStatusChangeEvent(uint64 serverConnectionHandlerID, int new
 			break;
 	}
 	set_result(&item->state_changed, errorNumber);
+}
+
+static void free_return_codes(struct WaitItem* item)
+{
+	if (item != NULL)
+	{
+		free_return_codes(item->next);
+		free_return_code_item(item);
+	}
+}
+
+static void free_connections(struct ConnectionItem* item)
+{
+	if (item != NULL)
+	{
+		free_connections(item->next);
+		free_connection_item(item);
+	}
+}
+
+void deinialize(void)
+{
+	if (pid)
+	{
+		ts3client_destroyClientLib();
+		free_return_codes(wait_items);
+		wait_items = NULL;
+		free_connections(connection_items);
+		connection_items = NULL;
+	}
+}
+
+static bool initialize(void)
+{
+	if (pid == 0)
+	{
+		struct ClientUIFunctions funcs;
+		memset(&funcs, 0, sizeof(funcs));
+		funcs.onConnectStatusChangeEvent    = onConnectStatusChangeEvent;
+		funcs.onServerErrorEvent            = onServerErrorEvent;
+		if (ts3client_initClientLib(&funcs, NULL, LogType_NONE, NULL, NULL) == ERROR_ok)
+		{
+			pid = getpid();
+			atexit(&deinialize);
+			return true;
+		}
+		else return false;
+	}
+	else return pid == getpid();
 }
 
 ZEND_BEGIN_ARG_INFO(arginfo_ts3client_getClientLibVersion, 0)
@@ -1543,21 +1593,8 @@ zend_function_entry ts3client_functions[] =
 	PHP_FE_END
 };
 
-atomic_uint instance_count = ATOMIC_VAR_INIT(0);
-
-
 PHP_MINIT_FUNCTION(ts3client)
 {
-	if (instance_count++ == 0)
-	{
-		struct ClientUIFunctions funcs;
-		memset(&funcs, 0, sizeof(funcs));
-        funcs.onConnectStatusChangeEvent    = onConnectStatusChangeEvent;
-        funcs.onServerErrorEvent            = onServerErrorEvent;
-		unsigned int error  = ts3client_initClientLib(&funcs, NULL, LogType_NONE, NULL, NULL);
-		if (error != ERROR_ok) return FAILURE;
-	}
-
 	REGISTER_LONG_CONSTANT("ERROR_ok", ERROR_ok, CONST_CS|CONST_PERSISTENT|CONST_CT_SUBST);
 	REGISTER_LONG_CONSTANT("ERROR_undefined", ERROR_undefined, CONST_CS|CONST_PERSISTENT|CONST_CT_SUBST);
 	REGISTER_LONG_CONSTANT("ERROR_not_implemented", ERROR_not_implemented, CONST_CS|CONST_PERSISTENT|CONST_CT_SUBST);
@@ -1842,42 +1879,6 @@ PHP_MINIT_FUNCTION(ts3client)
 	return SUCCESS;
 }
 
-void shutdown_return_codes(struct WaitItem* item)
-{
-	if (item != NULL)
-	{
-		shutdown_return_codes(item->next);
-		free_return_code_item(item);
-	}
-}
-
-void shutdown_connection_items(struct ConnectionItem* item)
-{
-	if (item != NULL)
-	{
-		shutdown_connection_items(item->next);
-		free_connection_item(item);
-	}
-}
-
-PHP_MSHUTDOWN_FUNCTION(ts3client)
-{
-	if (--instance_count == 0)
-	{
-		pthread_mutex_lock(&mutex);
-		if (instance_count  == 0)
-		{
-			ts3client_destroyClientLib();
-			shutdown_return_codes(wait_items);
-			wait_items = NULL;
-			shutdown_connection_items(connection_items);
-			connection_items = NULL;
-		}
-		pthread_mutex_unlock(&mutex);
-	}
-	return SUCCESS;
-}
-
 PHP_MINFO_FUNCTION(ts3client)
 {
 	php_info_print_table_start();
@@ -1886,13 +1887,18 @@ PHP_MINFO_FUNCTION(ts3client)
 	php_info_print_table_end();
 }
 
+PHP_RINIT_FUNCTION(ts3client)
+{
+	return initialize() ? SUCCESS : FAILURE;
+}
+
 zend_module_entry ts3client_module_entry = {
 	STANDARD_MODULE_HEADER,
 	"ts3client",
 	ts3client_functions,
 	PHP_MINIT(ts3client),
-	PHP_MSHUTDOWN(ts3client),
 	NULL,
+	PHP_RINIT(ts3client),
 	NULL,
 	PHP_MINFO(ts3client),
 	PHP_TS3CLIENT_VERSION,
