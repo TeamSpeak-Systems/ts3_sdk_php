@@ -43,7 +43,7 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct WaitItem *wait_items = NULL;
 static struct ConnectionItem *connection_items = NULL;
 
-void to_asciiz(char** pointer, size_t length)
+static void to_asciiz(char** pointer, size_t length)
 {
 	char* result;
 	if (*pointer)
@@ -57,7 +57,7 @@ void to_asciiz(char** pointer, size_t length)
 	*pointer = result;
 }
 
-struct WaitItem *create_return_code_item()
+static struct WaitItem *create_return_code_item()
 {
 	static atomic_uint next = ATOMIC_VAR_INIT(1);
 	struct WaitItem *result = malloc(sizeof(struct WaitItem));
@@ -74,7 +74,7 @@ struct WaitItem *create_return_code_item()
 	return result;
 }
 
-struct WaitItem *remove_return_code_item(unsigned int return_code)
+static struct WaitItem *remove_return_code_item(unsigned int return_code)
 {
 	pthread_mutex_lock(&mutex);
 	struct WaitItem **parent = &wait_items, *item;
@@ -96,13 +96,13 @@ struct WaitItem *remove_return_code_item(unsigned int return_code)
 	return item;
 }
 
-void free_return_code_item(struct WaitItem* item)
+static void free_return_code_item(struct WaitItem* item)
 {
 	pthread_cond_destroy(&item->cond);
 	free(item);
 }
 
-struct ConnectionItem* get_connection_item(uint64_t serverConnectionHandlerID)
+static struct ConnectionItem *get_connection_item(uint64_t serverConnectionHandlerID)
 {
 	pthread_mutex_lock(&mutex);
 	struct ConnectionItem *item = connection_items;
@@ -124,13 +124,13 @@ struct ConnectionItem* get_connection_item(uint64_t serverConnectionHandlerID)
 	return item;
 }
 
-void free_connection_item(struct ConnectionItem* item)
+static void free_connection_item(struct ConnectionItem* item)
 {
 	pthread_cond_destroy(&item->state_changed.cond);
 	free(item);
 }
 
-void delete_connection_item(uint64_t serverConnectionHandlerID)
+static void delete_connection_item(uint64_t serverConnectionHandlerID)
 {
 	pthread_mutex_lock(&mutex);
 	struct ConnectionItem **parent = &connection_items, *item;
@@ -152,7 +152,7 @@ void delete_connection_item(uint64_t serverConnectionHandlerID)
 	pthread_mutex_unlock(&mutex);
 }
 
-void set_result(struct WaitItem *item, unsigned int return_code)
+static void set_result(struct WaitItem *item, unsigned int return_code)
 {
 	pthread_mutex_lock(&mutex);
 	if (item->returned == false)
@@ -164,7 +164,7 @@ void set_result(struct WaitItem *item, unsigned int return_code)
 	pthread_mutex_unlock(&mutex);
 }
 
-void wait_for(struct WaitItem *item)
+static void wait_for(struct WaitItem *item)
 {
 	pthread_mutex_lock(&mutex);
 	struct timespec timeout;
@@ -184,7 +184,7 @@ void wait_for(struct WaitItem *item)
 	pthread_mutex_unlock(&mutex);
 }
 
-unsigned int handle_return_code(struct WaitItem *item, unsigned int error)
+static unsigned int handle_return_code(struct WaitItem *item, unsigned int error)
 {
 	if (error == ERROR_ok)
 	{
@@ -199,7 +199,7 @@ unsigned int handle_return_code(struct WaitItem *item, unsigned int error)
 	return error;
 }
 
-void onServerErrorEvent(uint64 serverConnectionHandlerID, const char* errorMessage, unsigned int error, const char* returnCode, const char* extraMessage)
+static void onServerErrorEvent(uint64 serverConnectionHandlerID, const char* errorMessage, unsigned int error, const char* returnCode, const char* extraMessage)
 {
 	(void)serverConnectionHandlerID;
 	(void)errorMessage;
@@ -223,7 +223,7 @@ void onServerErrorEvent(uint64 serverConnectionHandlerID, const char* errorMessa
 	}
 }
 
-void onConnectStatusChangeEvent(uint64 serverConnectionHandlerID, int newStatus, unsigned int errorNumber)
+static void onConnectStatusChangeEvent(uint64 serverConnectionHandlerID, int newStatus, unsigned int errorNumber)
 {
 	struct ConnectionItem *item = get_connection_item(serverConnectionHandlerID);
 	const bool connected = newStatus == STATUS_CONNECTION_ESTABLISHED;
